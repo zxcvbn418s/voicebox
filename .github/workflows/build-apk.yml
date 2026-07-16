@@ -1,0 +1,87 @@
+name: Build Voicebox Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voicebox-android-build
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+
+    steps:
+      - name: Checkout official mobile branch
+        uses: actions/checkout@v4
+        with:
+          repository: jamiepine/voicebox
+          ref: feat/mobile-app
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install locked dependencies
+        working-directory: mobile
+        run: bun install --frozen-lockfile
+
+      - name: Add required native peer dependencies
+        working-directory: mobile
+        run: bun x expo install expo-asset react-native-worklets expo-system-ui
+
+      - name: Align packages with Expo SDK
+        working-directory: mobile
+        run: bun x expo install --fix
+
+      - name: Validate Expo project
+        working-directory: mobile
+        run: bun x expo-doctor
+
+      - name: Generate Android project
+        working-directory: mobile
+        run: bun x expo prebuild --platform android --clean --no-install
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build standalone test APK
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Prepare APK
+        run: |
+          test -f mobile/android/app/build/outputs/apk/release/app-release.apk
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk voicebox-mobile-test.apk
+          ls -lh voicebox-mobile-test.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: voicebox-mobile-test-apk
+          path: voicebox-mobile-test.apk
+          if-no-files-found: error
+          retention-days: 30
